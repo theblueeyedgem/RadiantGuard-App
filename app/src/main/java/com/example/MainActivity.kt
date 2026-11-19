@@ -13,6 +13,8 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ui.AppNavigation
 import com.example.ui.AuthViewModel
+import com.example.ui.NoteViewModel
+import com.example.ui.SubscriptionViewModel
 import com.example.ui.VaultViewModel
 import com.example.ui.theme.MyApplicationTheme
 
@@ -21,7 +23,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         
-        val app = application as PassGuardApplication
+        val app = application as RadiantGuardApplication
         
         setContent {
             MyApplicationTheme {
@@ -42,14 +44,34 @@ class MainActivity : ComponentActivity() {
                         factory = object : ViewModelProvider.Factory {
                             @Suppress("UNCHECKED_CAST")
                             override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                                return VaultViewModel(app.repository) as T
+                                return VaultViewModel(app.vaultRepository) as T
+                            }
+                        }
+                    )
+
+                    val subscriptionViewModel: SubscriptionViewModel = viewModel(
+                        factory = object : ViewModelProvider.Factory {
+                            @Suppress("UNCHECKED_CAST")
+                            override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                                return SubscriptionViewModel(app, app.subscriptionRepository) as T
+                            }
+                        }
+                    )
+
+                    val noteViewModel: NoteViewModel = viewModel(
+                        factory = object : ViewModelProvider.Factory {
+                            @Suppress("UNCHECKED_CAST")
+                            override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                                return NoteViewModel(app, app.noteRepository) as T
                             }
                         }
                     )
                     
                     AppNavigation(
                         authViewModel = authViewModel,
-                        vaultViewModel = vaultViewModel
+                        vaultViewModel = vaultViewModel,
+                        subscriptionViewModel = subscriptionViewModel,
+                        noteViewModel = noteViewModel
                     )
                 }
             }

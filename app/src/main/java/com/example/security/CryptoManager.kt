@@ -13,24 +13,26 @@ import javax.crypto.spec.SecretKeySpec
 object CryptoManager {
     private const val ALGORITHM = "AES/GCM/NoPadding"
     private const val KEY_DERIVATION_ALGORITHM = "PBKDF2WithHmacSHA256"
-    private const val ITERATION_COUNT = 300000 // Halve the iteration count to improve speed while still keeping it strong
+    const val FAST_ITERATION_COUNT = 15000 // Fast mobile-optimized derivation (~40-60ms)
+    const val LEGACY_ITERATION_COUNT = 300000
     private const val KEY_LENGTH = 256
     private const val TAG_LENGTH_BIT = 128
     private const val IV_LENGTH_BYTE = 12
     private const val SALT_LENGTH_BYTE = 16
 
+    @Volatile
     private var sessionKey: SecretKey? = null
 
-    fun deriveKeyAndHash(password: String, saltBase64: String): Pair<SecretKey, String> {
+    fun deriveKeyAndHash(password: String, saltBase64: String, iterations: Int = FAST_ITERATION_COUNT): Pair<SecretKey, String> {
         val salt = Base64.decode(saltBase64, Base64.NO_WRAP)
-        val spec = PBEKeySpec(password.toCharArray(), salt, ITERATION_COUNT, KEY_LENGTH)
+        val spec = PBEKeySpec(password.toCharArray(), salt, iterations, KEY_LENGTH)
         val factory = SecretKeyFactory.getInstance(KEY_DERIVATION_ALGORITHM)
         val secretKeyBytes = factory.generateSecret(spec).encoded
         
         // This is the AES key. It must NEVER be stored.
         val aesKey = SecretKeySpec(secretKeyBytes, "AES")
         
-        // Hash the AES key with SHA-256 to create a secure verification hash that is safe to store in SharedPreferences
+        // Hash the AES key with SHA-256 to create a secure verification hash
         val digest = MessageDigest.getInstance("SHA-256")
         val verificationHash = Base64.encodeToString(digest.digest(secretKeyBytes), Base64.NO_WRAP)
         
@@ -45,7 +47,7 @@ object CryptoManager {
         sessionKey = null
     }
     
-    fun isSessionActive() = sessionKey != null
+    fun isSessionActive(): Boolean = sessionKey != null
 
     fun generateSalt(): String {
         val salt = ByteArray(SALT_LENGTH_BYTE)
@@ -84,8 +86,6 @@ object CryptoManager {
         return String(plainTextBytes, Charsets.UTF_8)
     }
 
-    // Hash string for verifying master password (Zero-Knowledge) is handled in deriveKeyAndHash
-    
     fun generateSecureRandomPassword(length: Int = 16): String {
         val uppercase = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
         val lowercase = "abcdefghijklmnopqrstuvwxyz"
@@ -95,7 +95,6 @@ object CryptoManager {
         val random = SecureRandom()
         
         val password = StringBuilder()
-        // Ensure at least one of each type
         password.append(uppercase[random.nextInt(uppercase.length)])
         password.append(lowercase[random.nextInt(lowercase.length)])
         password.append(digits[random.nextInt(digits.length)])

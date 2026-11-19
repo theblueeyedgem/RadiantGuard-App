@@ -1,17 +1,23 @@
 package com.example.ui.screens
 
-import androidx.compose.foundation.background
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.widget.Toast
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.DecryptedVaultItem
@@ -26,6 +32,7 @@ fun AddEditScreen(
 ) {
     val items by viewModel.vaultItems.collectAsStateWithLifecycle()
     val existingItem = items.find { it.id == itemId }
+    val context = LocalContext.current
 
     var title by remember { mutableStateOf(existingItem?.title ?: "") }
     var username by remember { mutableStateOf(existingItem?.username ?: "") }
@@ -33,8 +40,17 @@ fun AddEditScreen(
     var password by remember { mutableStateOf(existingItem?.password ?: "") }
     var totpSecret by remember { mutableStateOf(existingItem?.totpSecret ?: "") }
     var notes by remember { mutableStateOf(existingItem?.notes ?: "") }
+    var passwordVisible by remember { mutableStateOf(false) }
 
     var showConfirmDelete by remember { mutableStateOf(false) }
+
+    fun copyPassword() {
+        if (password.isNotEmpty()) {
+            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            clipboard.setPrimaryClip(ClipData.newPlainText("Password", password))
+            Toast.makeText(context, "Password copied to clipboard", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -75,7 +91,7 @@ fun AddEditScreen(
             ) {
                 Column(
                     modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
                     OutlinedTextField(
                         value = title,
@@ -97,12 +113,32 @@ fun AddEditScreen(
                         value = password,
                         onValueChange = { password = it },
                         label = { Text("Password") },
+                        visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            Row {
+                                if (password.isNotEmpty()) {
+                                    IconButton(onClick = { copyPassword() }) {
+                                        Icon(Icons.Default.ContentCopy, contentDescription = "Copy password")
+                                    }
+                                }
+                                IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                                    Icon(
+                                        imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                        contentDescription = if (passwordVisible) "Hide password" else "Show password"
+                                    )
+                                }
+                            }
+                        },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
                         shape = RoundedCornerShape(12.dp)
                     )
                     Button(
-                        onClick = { password = viewModel.generatePassword() },
+                        onClick = {
+                            password = viewModel.generatePassword()
+                            passwordVisible = true
+                            Toast.makeText(context, "Generated 16-character secure password", Toast.LENGTH_SHORT).show()
+                        },
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(
@@ -110,6 +146,8 @@ fun AddEditScreen(
                             contentColor = MaterialTheme.colorScheme.onPrimaryContainer
                         )
                     ) {
+                        Icon(Icons.Default.AutoFixHigh, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
                         Text("Generate Strong Password", fontWeight = FontWeight.Bold)
                     }
                 }
@@ -123,7 +161,7 @@ fun AddEditScreen(
             ) {
                 Column(
                     modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
                     OutlinedTextField(
                         value = url,
@@ -152,28 +190,30 @@ fun AddEditScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(4.dp))
             Button(
                 onClick = {
                     viewModel.saveItem(
                         DecryptedVaultItem(
                             id = existingItem?.id ?: 0,
-                            title = title,
+                            title = title.ifBlank { "Untitled" },
                             username = username,
                             url = url,
                             password = password,
-                            totpSecret = totpSecret,
+                            totpSecret = totpSecret.replace(" ", "").uppercase(),
                             notes = notes,
                             createdAt = existingItem?.createdAt ?: System.currentTimeMillis()
                         )
                     )
                     onNavigateBack()
                 },
-                modifier = Modifier.fillMaxWidth().height(48.dp),
-                shape = RoundedCornerShape(12.dp)
+                modifier = Modifier.fillMaxWidth().height(50.dp),
+                shape = RoundedCornerShape(14.dp)
             ) {
                 Text("Save to Vault", fontWeight = FontWeight.Bold)
             }
+            
+            Spacer(modifier = Modifier.height(16.dp))
         }
     }
 

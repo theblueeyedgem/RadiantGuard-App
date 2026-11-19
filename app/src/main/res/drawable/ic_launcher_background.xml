@@ -1,19 +1,37 @@
 <?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+    <!-- Dark textured bronze/gunmetal background -->
     <path android:pathData="M0,0h108v108h-108z">
-        <aapt:attr name="android:fillColor" xmlns:aapt="http://schemas.android.com/aapt">
+        <aapt:attr name="android:fillColor">
             <gradient
                 android:type="linear"
-                android:startX="0"
-                android:startY="0"
-                android:endX="108"
-                android:endY="108">
-                <item android:color="#FF1A237E" android:offset="0" />
-                <item android:color="#FF311B92" android:offset="1" />
+                android:startX="10"
+                android:startY="10"
+                android:endX="98"
+                android:endY="98">
+                <item android:offset="0.0" android:color="#FF24262B" />
+                <item android:offset="0.4" android:color="#FF1A1B1F" />
+                <item android:offset="1.0" android:color="#FF101113" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- Soft dark warm inner radial glow -->
+    <path
+        android:pathData="M54,54m-46,0a46,46 0 1,0 92,0a46,46 0 1,0 -92,0">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="radial"
+                android:centerX="54"
+                android:centerY="46"
+                android:gradientRadius="48">
+                <item android:offset="0.0" android:color="#28C57E42" />
+                <item android:offset="0.7" android:color="#08000000" />
+                <item android:offset="1.0" android:color="#00000000" />
             </gradient>
         </aapt:attr>
     </path>

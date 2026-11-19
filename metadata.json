@@ -1,6 +1,6 @@
 {
-  "name": "PassGuard",
-  "description": "A highly secure Password Manager with built-in Two-Factor Authenticator (2FA) utilizing AES-256-GCM encryption.",
+  "name": "Radiant Guard",
+  "description": "A luxury zero-knowledge vault featuring passwords with 2FA, subscription management with renewal alarms and phone notifications, and rich notes with phone storage and gallery export.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

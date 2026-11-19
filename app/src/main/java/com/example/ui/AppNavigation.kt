@@ -1,73 +1,109 @@
 package com.example.ui
 
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Scaffold
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.example.ui.screens.AddEditNoteScreen
 import com.example.ui.screens.AddEditScreen
 import com.example.ui.screens.LoginScreen
-import com.example.ui.screens.VaultListScreen
+import com.example.ui.screens.MainScreen
 
 @Composable
 fun AppNavigation(
     authViewModel: AuthViewModel,
-    vaultViewModel: VaultViewModel
+    vaultViewModel: VaultViewModel,
+    subscriptionViewModel: SubscriptionViewModel,
+    noteViewModel: NoteViewModel
 ) {
     val navController = rememberNavController()
     val authState by authViewModel.uiState.collectAsState()
 
-    Scaffold { innerPadding ->
+    // Smooth single-source-of-truth lock listener without glitching
+    LaunchedEffect(authState.screenState) {
+        if (authState.screenState != AuthScreenState.AUTHENTICATED) {
+            val currentRoute = navController.currentBackStackEntry?.destination?.route
+            if (currentRoute != null && currentRoute != "auth") {
+                navController.navigate("auth") {
+                    popUpTo(0) { inclusive = true }
+                }
+            }
+        }
+    }
+
+    Surface(modifier = Modifier.fillMaxSize()) {
         NavHost(
             navController = navController,
-            startDestination = if (authState.screenState == AuthScreenState.AUTHENTICATED) "vault" else "auth",
-            modifier = Modifier.padding(innerPadding)
+            startDestination = if (authState.screenState == AuthScreenState.AUTHENTICATED) "main" else "auth"
         ) {
             composable("auth") {
                 LoginScreen(
                     viewModel = authViewModel,
                     onAuthenticated = {
-                        navController.navigate("vault") {
+                        navController.navigate("main") {
                             popUpTo("auth") { inclusive = true }
                         }
                     }
                 )
             }
-            composable("vault") {
-                if (authState.screenState != AuthScreenState.AUTHENTICATED) {
-                    navController.navigate("auth") {
-                        popUpTo("vault") { inclusive = true }
-                    }
-                } else {
-                    VaultListScreen(
-                        viewModel = vaultViewModel,
-                        onLogout = {
-                            authViewModel.logout()
-                        },
-                        onNavigateToAdd = {
-                            navController.navigate("addEdit/-1")
-                        },
-                        onNavigateToEdit = { itemId ->
-                            navController.navigate("addEdit/$itemId")
+
+            composable("main") {
+                MainScreen(
+                    vaultViewModel = vaultViewModel,
+                    subscriptionViewModel = subscriptionViewModel,
+                    noteViewModel = noteViewModel,
+                    authViewModel = authViewModel,
+                    onLock = {
+                        authViewModel.logout()
+                        navController.navigate("auth") {
+                            popUpTo(0) { inclusive = true }
                         }
-                    )
-                }
+                    },
+                    onNavigateToAddPassword = {
+                        navController.navigate("addEditPassword/-1")
+                    },
+                    onNavigateToEditPassword = { itemId ->
+                        navController.navigate("addEditPassword/$itemId")
+                    },
+                    onNavigateToAddNote = {
+                        navController.navigate("addEditNote/-1")
+                    },
+                    onNavigateToEditNote = { noteId ->
+                        navController.navigate("addEditNote/$noteId")
+                    }
+                )
             }
+
             composable(
-                route = "addEdit/{itemId}",
+                route = "addEditPassword/{itemId}",
                 arguments = listOf(navArgument("itemId") { type = NavType.IntType })
             ) { backStackEntry ->
                 val itemId = backStackEntry.arguments?.getInt("itemId") ?: -1
                 AddEditScreen(
                     itemId = itemId,
                     viewModel = vaultViewModel,
+                    onNavigateBack = {
+                        navController.popBackStack()
+                    }
+                )
+            }
+
+            composable(
+                route = "addEditNote/{noteId}",
+                arguments = listOf(navArgument("noteId") { type = NavType.IntType })
+            ) { backStackEntry ->
+                val noteId = backStackEntry.arguments?.getInt("noteId") ?: -1
+                AddEditNoteScreen(
+                    noteId = noteId,
+                    viewModel = noteViewModel,
                     onNavigateBack = {
                         navController.popBackStack()
                     }
