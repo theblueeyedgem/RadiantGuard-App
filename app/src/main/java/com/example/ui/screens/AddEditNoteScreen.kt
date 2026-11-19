@@ -33,15 +33,20 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import com.example.data.NoteAttachment
 import com.example.data.NoteItem
+import com.example.security.CryptoManager
 import com.example.ui.NoteViewModel
+import com.example.ui.theme.NoteColors
 import kotlinx.coroutines.launch
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun AddEditNoteScreen(
     noteId: Int,
@@ -58,7 +63,11 @@ fun AddEditNoteScreen(
     var title by remember { mutableStateOf(existingNote?.title ?: "") }
     var content by remember { mutableStateOf(existingNote?.content ?: "") }
     var colorHex by remember { mutableStateOf(existingNote?.colorHex ?: "#FFFFFF") }
+    var backgroundStyle by remember { mutableStateOf(existingNote?.backgroundStyle ?: "solid") }
     var isPinned by remember { mutableStateOf(existingNote?.isPinned ?: false) }
+    var isLocked by remember { mutableStateOf(existingNote?.isLocked ?: false) }
+    var lockPasswordHash by remember { mutableStateOf(existingNote?.lockPasswordHash ?: "") }
+    var showLockDialog by remember { mutableStateOf(false) }
     var attachments by remember { mutableStateOf<List<NoteAttachment>>(existingNote?.getAttachments() ?: emptyList()) }
     var previewImageAttachment by remember { mutableStateOf<NoteAttachment?>(null) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
@@ -68,7 +77,10 @@ fun AddEditNoteScreen(
             title = existingNote.title
             content = existingNote.content
             colorHex = existingNote.colorHex
+            backgroundStyle = existingNote.backgroundStyle
             isPinned = existingNote.isPinned
+            isLocked = existingNote.isLocked
+            lockPasswordHash = existingNote.lockPasswordHash
             attachments = existingNote.getAttachments()
         }
     }
@@ -119,14 +131,14 @@ fun AddEditNoteScreen(
         }
     }
 
-    val colorOptions = listOf(
-        "#FFFFFF", // White
-        "#FFF7ED", // Warm Amber
-        "#F0FDF4", // Sage Green
-        "#F0F9FF", // Sky Blue
-        "#FFF1F2", // Blush Rose
-        "#F8FAFC"  // Slate Pearl
-    )
+    // 12 offered solid colours: 6 light pastels + 6 dark-friendly (see NoteColors).
+    val colorOptions = NoteColors.SOLID_COLORS
+    val gradientOptions = NoteColors.GRADIENT_STYLES
+    // Effective background colour for the top bar / Scaffold (first gradient hex when gradient).
+    val effectiveBgHex = NoteColors.gradientHexes(backgroundStyle).firstOrNull() ?: colorHex
+    // Deterministic readable text colour for this background (both themes).
+    val editorTextColor = NoteColors.contentColorForStyle(backgroundStyle, colorHex)
+    val editorMutedColor = editorTextColor.copy(alpha = 0.6f)
 
     fun parseColor(hex: String): Color {
         return try {
@@ -148,6 +160,13 @@ fun AddEditNoteScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = { showLockDialog = true }) {
+                        Icon(
+                            imageVector = if (isLocked) Icons.Default.Lock else Icons.Default.LockOpen,
+                            contentDescription = if (isLocked) "Note locked — change password" else "Lock note with password",
+                            tint = if (isLocked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                        )
+                    }
                     IconButton(onClick = { isPinned = !isPinned }) {
                         Icon(
                             imageVector = if (isPinned) Icons.Default.PushPin else Icons.Default.OutlinedFlag,
@@ -167,7 +186,10 @@ fun AddEditNoteScreen(
                                 title = title,
                                 content = content,
                                 colorHex = colorHex,
+                                backgroundStyle = backgroundStyle,
                                 isPinned = isPinned,
+                                isLocked = isLocked,
+                                lockPasswordHash = lockPasswordHash,
                                 attachments = attachments
                             )
                             onNavigateBack()
@@ -177,7 +199,7 @@ fun AddEditNoteScreen(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = parseColor(colorHex).copy(alpha = 0.95f)
+                    containerColor = parseColor(effectiveBgHex).copy(alpha = 0.95f)
                 )
             )
         },
@@ -217,33 +239,21 @@ fun AddEditNoteScreen(
                         }
                     }
 
-                    // Color swatches
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        colorOptions.forEach { hex ->
-                            val c = parseColor(hex)
-                            Box(
-                                modifier = Modifier
-                                    .size(28.dp)
-                                    .clip(CircleShape)
-                                    .background(c)
-                                    .border(
-                                        width = if (colorHex == hex) 2.dp else 1.dp,
-                                        color = if (colorHex == hex) MaterialTheme.colorScheme.primary else Color.LightGray,
-                                        shape = CircleShape
-                                    )
-                                    .clickable { colorHex = hex }
-                            )
-                        }
-                    }
+                    Text(
+                        "Backgrounds below",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         },
-        containerColor = parseColor(colorHex)
+        containerColor = parseColor(effectiveBgHex)
     ) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .then(if (NoteColors.isGradient(backgroundStyle)) Modifier.background(NoteColors.gradientBrush(backgroundStyle)!!) else Modifier)
                 .padding(horizontal = 20.dp, vertical = 12.dp)
                 .verticalScroll(scrollState)
         ) {
@@ -251,13 +261,16 @@ fun AddEditNoteScreen(
             TextField(
                 value = title,
                 onValueChange = { title = it },
-                placeholder = { Text("Title", style = MaterialTheme.typography.headlineMedium, color = Color.Gray) },
-                textStyle = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
+                placeholder = { Text("Title", style = MaterialTheme.typography.headlineMedium, color = editorMutedColor) },
+                textStyle = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold, color = editorTextColor),
                 colors = TextFieldDefaults.colors(
                     focusedContainerColor = Color.Transparent,
                     unfocusedContainerColor = Color.Transparent,
                     focusedIndicatorColor = Color.Transparent,
-                    unfocusedIndicatorColor = Color.Transparent
+                    unfocusedIndicatorColor = Color.Transparent,
+                    focusedTextColor = editorTextColor,
+                    unfocusedTextColor = editorTextColor,
+                    cursorColor = editorTextColor
                 ),
                 modifier = Modifier.fillMaxWidth()
             )
@@ -266,9 +279,56 @@ fun AddEditNoteScreen(
             Text(
                 text = dateFormat.format(Date(existingNote?.updatedAt ?: System.currentTimeMillis())),
                 style = MaterialTheme.typography.labelSmall,
-                color = Color.Gray,
+                color = editorMutedColor,
                 modifier = Modifier.padding(start = 16.dp, bottom = 12.dp)
             )
+
+            // Backgrounds: solid colours + gradients (second row of swatches)
+            Text(
+                text = "BACKGROUNDS",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                letterSpacing = 1.sp,
+                modifier = Modifier.padding(start = 16.dp, bottom = 8.dp)
+            )
+            FlowRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, bottom = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                colorOptions.forEach { hex ->
+                    val c = parseColor(hex)
+                    Box(
+                        modifier = Modifier
+                            .size(30.dp)
+                            .clip(CircleShape)
+                            .background(c)
+                            .border(
+                                width = if (backgroundStyle == "solid" && colorHex == hex) 2.dp else 1.dp,
+                                color = if (backgroundStyle == "solid" && colorHex == hex) MaterialTheme.colorScheme.primary else Color.LightGray,
+                                shape = CircleShape
+                            )
+                            .clickable { colorHex = hex; backgroundStyle = "solid" }
+                    )
+                }
+                gradientOptions.forEach { style ->
+                    Box(
+                        modifier = Modifier
+                            .size(width = 52.dp, height = 30.dp)
+                            .clip(RoundedCornerShape(15.dp))
+                            .background(NoteColors.gradientBrush(style)!!)
+                            .border(
+                                width = if (backgroundStyle == style) 2.dp else 1.dp,
+                                color = if (backgroundStyle == style) MaterialTheme.colorScheme.primary else Color.LightGray,
+                                shape = RoundedCornerShape(15.dp)
+                            )
+                            .clickable { backgroundStyle = style }
+                    )
+                }
+            }
 
             // Attachments Preview Section
             if (attachments.isNotEmpty()) {
@@ -305,13 +365,16 @@ fun AddEditNoteScreen(
             TextField(
                 value = content,
                 onValueChange = { content = it },
-                placeholder = { Text("Note content...", style = MaterialTheme.typography.bodyLarge, color = Color.Gray) },
-                textStyle = MaterialTheme.typography.bodyLarge,
+                placeholder = { Text("Note content...", style = MaterialTheme.typography.bodyLarge, color = editorMutedColor) },
+                textStyle = MaterialTheme.typography.bodyLarge.copy(color = editorTextColor),
                 colors = TextFieldDefaults.colors(
                     focusedContainerColor = Color.Transparent,
                     unfocusedContainerColor = Color.Transparent,
                     focusedIndicatorColor = Color.Transparent,
-                    unfocusedIndicatorColor = Color.Transparent
+                    unfocusedIndicatorColor = Color.Transparent,
+                    focusedTextColor = editorTextColor,
+                    unfocusedTextColor = editorTextColor,
+                    cursorColor = editorTextColor
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
@@ -320,6 +383,56 @@ fun AddEditNoteScreen(
 
             Spacer(modifier = Modifier.height(32.dp))
         }
+    }
+
+    // Per-note lock password dialog
+    if (showLockDialog) {
+        var lockPassword by remember { mutableStateOf("") }
+        var lockError by remember { mutableStateOf<String?>(null) }
+        AlertDialog(
+            onDismissRequest = { showLockDialog = false },
+            title = { Text(if (isLocked) "Note Locked" else "Lock Note") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        if (isLocked) "This note is locked. Enter a new password to change it, or remove the lock."
+                        else "Set a password for this note (at least 4 characters). Its content stays hidden until the password is entered.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    OutlinedTextField(
+                        value = lockPassword,
+                        onValueChange = { lockPassword = it; lockError = null },
+                        label = { Text("Note password") },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Password),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    if (lockError != null) Text(lockError!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    if (lockPassword.length < 4) {
+                        lockError = "Password must be at least 4 characters"
+                    } else {
+                        lockPasswordHash = CryptoManager.sha256Hex(lockPassword)
+                        isLocked = true
+                        showLockDialog = false
+                    }
+                }) { Text(if (isLocked) "Change Password" else "Lock Note") }
+            },
+            dismissButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (isLocked) {
+                        TextButton(onClick = { isLocked = false; lockPasswordHash = ""; showLockDialog = false }) {
+                            Text("Remove Lock")
+                        }
+                    }
+                    TextButton(onClick = { showLockDialog = false }) { Text("Cancel") }
+                }
+            }
+        )
     }
 
     // Image Preview Dialog

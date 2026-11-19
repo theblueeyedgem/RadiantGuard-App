@@ -12,6 +12,10 @@ data class NoteItem(
     val content: String,
     val colorHex: String = "#FFFFFF",
     val isPinned: Boolean = false,
+    val isLocked: Boolean = false,
+    /** SHA-256 hex of the per-note lock password; empty = no lock password set. */
+    val lockPasswordHash: String = "",
+    val backgroundStyle: String = "solid", // "solid" (uses colorHex) or "gradient:#HEX1,#HEX2"
     val attachmentsJson: String = "[]",
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()

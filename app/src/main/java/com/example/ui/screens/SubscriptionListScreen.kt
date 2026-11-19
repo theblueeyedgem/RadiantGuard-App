@@ -12,6 +12,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -25,19 +26,21 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.data.Currencies
 import com.example.data.SubscriptionItem
 import com.example.ui.SubscriptionViewModel
 import java.text.SimpleDateFormat
 import java.util.*
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun SubscriptionListScreen(
     viewModel: SubscriptionViewModel
@@ -113,12 +116,27 @@ fun SubscriptionListScreen(
                             letterSpacing = 1.sp
                         )
                         Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "$${String.format(Locale.US, "%.2f", summary.totalMonthlySpend)}",
-                            style = MaterialTheme.typography.headlineLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
+                        if (summary.monthlyByCurrency.isEmpty()) {
+                            Text(
+                                text = Currencies.format("PKR", 0.0),
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        } else {
+                            summary.monthlyByCurrency.entries.sortedBy { it.key }.forEach { (code, amount) ->
+                                Text(
+                                    text = Currencies.format(code, amount),
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
                         Spacer(modifier = Modifier.height(14.dp))
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -158,7 +176,7 @@ fun SubscriptionListScreen(
                                     Icon(
                                         Icons.Default.NotificationsActive,
                                         contentDescription = null,
-                                        tint = Color(0xFFD97706),
+                                        tint = MaterialTheme.colorScheme.primary,
                                         modifier = Modifier.size(18.dp)
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
@@ -236,6 +254,7 @@ fun SubscriptionListScreen(
                             selectedSubscriptionForEdit = item
                             isAddSheetOpen = true
                         },
+                        onTogglePin = { viewModel.togglePin(item) },
                         onToggleAlarm = {
                             checkAndRequestNotificationPermission()
                             viewModel.toggleAlarm(item)
@@ -276,9 +295,11 @@ fun SubscriptionListScreen(
 fun SubscriptionCard(
     item: SubscriptionItem,
     onClick: () -> Unit,
+    onTogglePin: () -> Unit = {},
     onToggleAlarm: () -> Unit,
     onTestAlarm: () -> Unit
 ) {
+    var showMenu by remember { mutableStateOf(false) }
     val dateFormat = SimpleDateFormat("MMM dd, yyyy", Locale.getDefault())
     val formattedDate = dateFormat.format(Date(item.nextRenewalTimestamp))
 
@@ -291,7 +312,7 @@ fun SubscriptionCard(
     }
     val countdownColor = when {
         daysDiff <= 1 -> MaterialTheme.colorScheme.error
-        daysDiff <= 5 -> Color(0xFFD97706)
+        daysDiff <= 5 -> MaterialTheme.colorScheme.tertiary
         else -> MaterialTheme.colorScheme.primary
     }
 
@@ -329,11 +350,23 @@ fun SubscriptionCard(
 
                 Column(modifier = Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (item.isPinned) {
+                            Icon(
+                                Icons.Default.PushPin,
+                                contentDescription = "Pinned",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                        }
                         Text(
                             text = item.name,
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Surface(
@@ -344,6 +377,8 @@ fun SubscriptionCard(
                                 text = item.category,
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                             )
                         }
@@ -354,22 +389,40 @@ fun SubscriptionCard(
                         text = "$formattedDate • $countdownText",
                         style = MaterialTheme.typography.bodySmall,
                         color = countdownColor,
-                        fontWeight = FontWeight.SemiBold
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
 
                 Column(horizontalAlignment = Alignment.End) {
                     Text(
-                        text = "${item.currency}${String.format(Locale.US, "%.2f", item.price)}",
+                        text = Currencies.format(item.currency, item.price),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     Text(
                         text = item.billingCycle,
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
+                    Box {
+                        IconButton(onClick = { showMenu = true }, modifier = Modifier.size(28.dp)) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "More options", modifier = Modifier.size(18.dp))
+                        }
+                        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                            DropdownMenuItem(
+                                text = { Text(if (item.isPinned) "Unpin" else "Pin") },
+                                onClick = { showMenu = false; onTogglePin() },
+                                leadingIcon = { Icon(Icons.Default.PushPin, contentDescription = null) }
+                            )
+                        }
+                    }
                 }
             }
 
@@ -393,7 +446,10 @@ fun SubscriptionCard(
                     Text(
                         text = if (item.isAlarmActive) "Alarm set (${item.reminderDaysBefore}d prior at ${String.format(Locale.US, "%02d:%02d", item.reminderHour, item.reminderMinute)})" else "Alarms paused",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
                     )
                 }
 
@@ -405,7 +461,7 @@ fun SubscriptionCard(
                         Icon(
                             Icons.Default.NotificationsActive,
                             contentDescription = "Test alarm",
-                            tint = Color(0xFFD97706),
+                            tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(18.dp)
                         )
                     }
@@ -426,7 +482,7 @@ fun SubscriptionCard(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun SubscriptionEditDialog(
     existing: SubscriptionItem?,
@@ -438,7 +494,8 @@ fun SubscriptionEditDialog(
     val context = LocalContext.current
     var name by remember { mutableStateOf(existing?.name ?: "") }
     var priceStr by remember { mutableStateOf(if (existing != null) String.format(Locale.US, "%.2f", existing.price) else "") }
-    var currency by remember { mutableStateOf(existing?.currency ?: "$") }
+    var currency by remember { mutableStateOf(Currencies.normalizeCurrency(existing?.currency)) }
+    var currencyMenuExpanded by remember { mutableStateOf(false) }
     var category by remember { mutableStateOf(existing?.category ?: "Entertainment") }
     var billingCycle by remember { mutableStateOf(existing?.billingCycle ?: "Monthly") }
     var nextRenewalMs by remember {
@@ -490,31 +547,55 @@ fun SubscriptionEditDialog(
                 ) {
                     OutlinedTextField(
                         value = priceStr,
-                        onValueChange = { priceStr = it },
+                        onValueChange = { priceStr = it.filter { c -> c.isDigit() || c == '.' } },
                         label = { Text("Price") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         singleLine = true,
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(12.dp)
                     )
-                    OutlinedTextField(
-                        value = currency,
-                        onValueChange = { currency = it },
-                        label = { Text("Currency") },
-                        singleLine = true,
-                        modifier = Modifier.width(80.dp),
-                        shape = RoundedCornerShape(12.dp)
-                    )
+                    // Currency picker (was a free-text 80dp field)
+                    Box(modifier = Modifier.weight(1f)) {
+                        OutlinedTextField(
+                            value = "${Currencies.forCode(currency).symbol} ${Currencies.forCode(currency).code}",
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Currency") },
+                            trailingIcon = {
+                                IconButton(onClick = { currencyMenuExpanded = !currencyMenuExpanded }) {
+                                    Icon(Icons.Default.ArrowDropDown, contentDescription = "Choose currency")
+                                }
+                            },
+                            singleLine = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { currencyMenuExpanded = true },
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        DropdownMenu(
+                            expanded = currencyMenuExpanded,
+                            onDismissRequest = { currencyMenuExpanded = false }
+                        ) {
+                            Currencies.ALL.forEach { info ->
+                                DropdownMenuItem(
+                                    text = { Text("${info.code} (${info.symbol}) — ${info.country}", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                    onClick = { currency = info.code; currencyMenuExpanded = false }
+                                )
+                            }
+                        }
+                    }
                 }
 
-                // Category selector
+                // Category selector (all 7, wrapping — Music/Utilities/Other were unreachable before)
                 Column {
                     Text("Category", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(modifier = Modifier.height(4.dp))
-                    Row(
+                    FlowRow(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        categories.take(4).forEach { cat ->
+                        categories.forEach { cat ->
                             FilterChip(
                                 selected = category == cat,
                                 onClick = { category = cat },
@@ -528,9 +609,10 @@ fun SubscriptionEditDialog(
                 Column {
                     Text("Billing Cycle", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(modifier = Modifier.height(4.dp))
-                    Row(
+                    FlowRow(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         cycles.forEach { cycle ->
                             FilterChip(
@@ -603,9 +685,10 @@ fun SubscriptionEditDialog(
                         if (isAlarmActive) {
                             Spacer(modifier = Modifier.height(8.dp))
                             Text("Notify before renewal:", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Row(
+                            FlowRow(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
                                 reminderDayOptions.forEach { d ->
                                     FilterChip(
@@ -642,6 +725,17 @@ fun SubscriptionEditDialog(
                     }
                 }
 
+                // Notes (declared & saved before, but had no field in the dialog)
+                OutlinedTextField(
+                    value = notes,
+                    onValueChange = { notes = it },
+                    label = { Text("Notes (optional)") },
+                    minLines = 2,
+                    maxLines = 3,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                )
+
                 // Immediate test alarm button
                 OutlinedButton(
                     onClick = {
@@ -656,12 +750,14 @@ fun SubscriptionEditDialog(
                             reminderDaysBefore = reminderDaysBefore,
                             reminderHour = reminderHour,
                             reminderMinute = reminderMinute,
-                            isAlarmActive = true
+                            isAlarmActive = true,
+                            isPinned = existing?.isPinned ?: false,
+                            createdAt = existing?.createdAt ?: System.currentTimeMillis()
                         )
                         onTestAlarm(tempItem)
                     },
                     modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFD97706)),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary),
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Icon(Icons.Default.NotificationsActive, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -686,7 +782,9 @@ fun SubscriptionEditDialog(
                         reminderHour = reminderHour,
                         reminderMinute = reminderMinute,
                         notes = notes,
-                        isAlarmActive = isAlarmActive
+                        isAlarmActive = isAlarmActive,
+                        isPinned = existing?.isPinned ?: false,
+                        createdAt = existing?.createdAt ?: System.currentTimeMillis()
                     )
                     onSave(item)
                 },

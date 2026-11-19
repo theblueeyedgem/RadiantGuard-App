@@ -33,7 +33,7 @@ class RadiantGuardApplication : Application() {
             applicationContext,
             VaultDatabase::class.java,
             "radiant_guard_db"
-        ).fallbackToDestructiveMigration(dropAllTables = true).build()
+        ).addMigrations(VaultDatabase.MIGRATION_2_3).build()
         
         vaultRepository = VaultRepository(database.vaultDao())
         subscriptionRepository = SubscriptionRepository(database.subscriptionDao())

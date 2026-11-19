@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import android.content.Intent
 import android.widget.Toast
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
@@ -29,10 +30,15 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
+import com.example.RadiantGuardApplication
+import com.example.data.ExportManager
 import com.example.ui.AuthViewModel
 import com.example.ui.NoteViewModel
 import com.example.ui.SubscriptionViewModel
 import com.example.ui.VaultViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 enum class MainTab {
     VAULT,
@@ -53,10 +59,47 @@ fun MainScreen(
     onNavigateToAddNote: () -> Unit,
     onNavigateToEditNote: (Int) -> Unit
 ) {
-    var currentTab by remember { mutableStateOf(MainTab.VAULT) }
+    // FIX (item 5): rememberSaveable (stored as an ordinal Int, which IS Bundle-saveable)
+    // so returning from Add/Edit restores the tab the user was on instead of
+    // always falling back to VAULT. MainScreen is a NavHost destination, so its
+    // saved state survives popBackStack from addEditNote / addEditPassword.
+    var currentTabOrdinal by rememberSaveable { mutableIntStateOf(MainTab.VAULT.ordinal) }
+    val currentTab: MainTab = MainTab.entries.getOrElse(currentTabOrdinal) { MainTab.VAULT }
+
     var showChangePinDialog by remember { mutableStateOf(false) }
+    var showOverflowMenu by remember { mutableStateOf(false) }
     val authUiState by authViewModel.uiState.collectAsState()
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val app = context.applicationContext as RadiantGuardApplication
+    val themeMode by app.settingsStore.themeModeFlow.collectAsState()
+
+    fun runExport(asPdf: Boolean) {
+        showOverflowMenu = false
+        coroutineScope.launch(Dispatchers.IO) {
+            try {
+                val manager = ExportManager(context)
+                val result = if (asPdf) manager.exportPdf() else manager.exportDoc()
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(
+                        context,
+                        "Export saved: ${result.fileName} (${result.displayPath})",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    val share = Intent(Intent.ACTION_SEND).apply {
+                        type = if (asPdf) "application/pdf" else "application/msword"
+                        putExtra(Intent.EXTRA_STREAM, result.uri)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    context.startActivity(Intent.createChooser(share, "Share emergency export"))
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "Export failed: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -75,13 +118,15 @@ fun MainScreen(
                             Text(
                                 text = "Radiant Guard",
                                 fontWeight = FontWeight.Bold,
-                                style = MaterialTheme.typography.titleMedium
+                                style = MaterialTheme.typography.titleMedium,
+                                maxLines = 1
                             )
                             Text(
                                 text = "PIN Protected (${authUiState.pinLength} Digits)",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.primary,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1
                             )
                         }
                     }
@@ -105,7 +150,7 @@ fun MainScreen(
                     IconButton(
                         onClick = onLock,
                         modifier = Modifier
-                            .padding(end = 8.dp)
+                            .padding(end = 4.dp)
                             .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape)
                     ) {
                         Icon(
@@ -113,6 +158,76 @@ fun MainScreen(
                             contentDescription = "Lock Vault",
                             tint = MaterialTheme.colorScheme.onSecondaryContainer
                         )
+                    }
+
+                    // Overflow: theme + emergency export
+                    Box {
+                        IconButton(
+                            onClick = { showOverflowMenu = true },
+                            modifier = Modifier
+                                .padding(end = 8.dp)
+                                .background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)
+                        ) {
+                            Icon(
+                                Icons.Default.MoreVert,
+                                contentDescription = "More options",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = showOverflowMenu,
+                            onDismissRequest = { showOverflowMenu = false }
+                        ) {
+                            Text(
+                                "THEME",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                            )
+                            listOf("system" to "System default", "light" to "Light", "dark" to "Dark").forEach { (mode, label) ->
+                                DropdownMenuItem(
+                                    text = { Text(label) },
+                                    onClick = {
+                                        app.settingsStore.setThemeMode(mode)
+                                        showOverflowMenu = false
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            when (mode) {
+                                                "light" -> Icons.Default.LightMode
+                                                "dark" -> Icons.Default.DarkMode
+                                                else -> Icons.Default.BrightnessAuto
+                                            },
+                                            contentDescription = null
+                                        )
+                                    },
+                                    trailingIcon = {
+                                        if (themeMode == mode) {
+                                            Icon(Icons.Default.Check, contentDescription = "Selected")
+                                        }
+                                    }
+                                )
+                            }
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                            Text(
+                                "EMERGENCY EXPORT",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Export as PDF") },
+                                onClick = { runExport(asPdf = true) },
+                                leadingIcon = { Icon(Icons.Default.PictureAsPdf, contentDescription = null) }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Export as Word (.doc)") },
+                                onClick = { runExport(asPdf = false) },
+                                leadingIcon = { Icon(Icons.Default.Description, contentDescription = null) }
+                            )
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -127,21 +242,21 @@ fun MainScreen(
             ) {
                 NavigationBarItem(
                     selected = currentTab == MainTab.VAULT,
-                    onClick = { currentTab = MainTab.VAULT },
+                    onClick = { currentTabOrdinal = MainTab.VAULT.ordinal },
                     icon = { Icon(Icons.Default.VpnKey, contentDescription = "Vault") },
-                    label = { Text("Vault") }
+                    label = { Text("Vault", maxLines = 1) }
                 )
                 NavigationBarItem(
                     selected = currentTab == MainTab.SUBSCRIPTIONS,
-                    onClick = { currentTab = MainTab.SUBSCRIPTIONS },
+                    onClick = { currentTabOrdinal = MainTab.SUBSCRIPTIONS.ordinal },
                     icon = { Icon(Icons.Default.EventRepeat, contentDescription = "Subscriptions") },
-                    label = { Text("Subscriptions") }
+                    label = { Text("Subscriptions", maxLines = 1) }
                 )
                 NavigationBarItem(
                     selected = currentTab == MainTab.NOTES,
-                    onClick = { currentTab = MainTab.NOTES },
+                    onClick = { currentTabOrdinal = MainTab.NOTES.ordinal },
                     icon = { Icon(Icons.Default.Description, contentDescription = "Notes") },
-                    label = { Text("Notes") }
+                    label = { Text("Notes", maxLines = 1) }
                 )
             }
         },
@@ -175,14 +290,15 @@ fun MainScreen(
     if (showChangePinDialog) {
         ChangePinDialog(
             currentLength = authUiState.pinLength,
+            isChanging = authUiState.isChangingPin,
             onDismiss = { showChangePinDialog = false },
-            onConfirmNewPin = { newPin, newLength ->
-                authViewModel.changePin(newPin, newLength) { success ->
+            onConfirmNewPin = { currentPin, newPin, newLength ->
+                authViewModel.changePin(currentPin, newPin, newLength) { success, error ->
                     if (success) {
-                        Toast.makeText(context, "Vault PIN updated to $newLength digits", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Vault PIN updated to $newLength digits — all vault items re-encrypted", Toast.LENGTH_SHORT).show()
                         showChangePinDialog = false
                     } else {
-                        Toast.makeText(context, "Failed to update PIN", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, error ?: "Failed to update PIN", Toast.LENGTH_LONG).show()
                     }
                 }
             }
@@ -193,10 +309,12 @@ fun MainScreen(
 @Composable
 fun ChangePinDialog(
     currentLength: Int,
+    isChanging: Boolean = false,
     onDismiss: () -> Unit,
-    onConfirmNewPin: (String, Int) -> Unit
+    onConfirmNewPin: (currentPin: String, newPin: String, newLength: Int) -> Unit
 ) {
     var selectedLength by remember { mutableIntStateOf(currentLength) }
+    var currentPin by remember { mutableStateOf("") }
     var newPin by remember { mutableStateOf("") }
     var confirmPin by remember { mutableStateOf("") }
     var pinVisible by remember { mutableStateOf(false) }
@@ -215,9 +333,24 @@ fun ChangePinDialog(
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 Text(
-                    "You decide your PIN length. Choose your desired length and enter your new numeric PIN.",
+                    "Your current PIN is required — the vault is re-encrypted with the new PIN, so your saved passwords keep working.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                // Current PIN (new: the old dialog never asked for it)
+                OutlinedTextField(
+                    value = currentPin,
+                    onValueChange = { input ->
+                        currentPin = input.filter { it.isDigit() }.take(currentLength)
+                        errorText = null
+                    },
+                    label = { Text("Current $currentLength-Digit PIN") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    visualTransformation = if (pinVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
                 )
 
                 Text(
@@ -338,17 +471,26 @@ fun ChangePinDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    if (newPin.length != selectedLength) {
+                    if (currentPin.length != currentLength) {
+                        errorText = "Please enter your current $currentLength-digit PIN"
+                    } else if (newPin.length != selectedLength) {
                         errorText = "PIN must be exactly $selectedLength digits"
                     } else if (newPin != confirmPin) {
                         errorText = "PINs do not match"
+                    } else if (newPin == currentPin && selectedLength == currentLength) {
+                        errorText = "New PIN is the same as the current PIN"
                     } else {
-                        onConfirmNewPin(newPin, selectedLength)
+                        onConfirmNewPin(currentPin, newPin, selectedLength)
                     }
                 },
-                enabled = newPin.length == selectedLength && confirmPin.length == selectedLength
+                enabled = !isChanging && currentPin.length == currentLength &&
+                    newPin.length == selectedLength && confirmPin.length == selectedLength
             ) {
-                Text("Update PIN")
+                if (isChanging) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                } else {
+                    Text("Update PIN")
+                }
             }
         },
         dismissButton = {

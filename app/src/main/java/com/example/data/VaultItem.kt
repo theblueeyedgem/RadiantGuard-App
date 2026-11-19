@@ -12,6 +12,10 @@ data class VaultItem(
     val passwordEnc: String,
     val notesEnc: String,
     val totpSecretEnc: String,
+    val isPinned: Boolean = false,
+    val isLocked: Boolean = false,
+    /** SHA-256 hex of the per-item lock password; empty = no lock password set. */
+    val lockPasswordHash: String = "",
     val createdAt: Long = System.currentTimeMillis()
 )
 
@@ -24,5 +28,8 @@ data class DecryptedVaultItem(
     val password: String,
     val notes: String,
     val totpSecret: String,
+    val isPinned: Boolean = false,
+    val isLocked: Boolean = false,
+    val lockPasswordHash: String = "",
     val createdAt: Long
 )

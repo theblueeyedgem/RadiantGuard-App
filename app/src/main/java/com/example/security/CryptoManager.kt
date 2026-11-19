@@ -56,34 +56,48 @@ object CryptoManager {
     }
 
     fun encrypt(plainText: String): String {
-        if (plainText.isEmpty()) return ""
         val key = sessionKey ?: throw IllegalStateException("Session key not initialized")
+        return encryptWithKey(key, plainText)
+    }
+
+    fun encryptWithKey(key: SecretKey, plainText: String): String {
+        if (plainText.isEmpty()) return ""
         val cipher = Cipher.getInstance(ALGORITHM)
         val iv = ByteArray(IV_LENGTH_BYTE)
         SecureRandom().nextBytes(iv)
         val spec = GCMParameterSpec(TAG_LENGTH_BIT, iv)
         cipher.init(Cipher.ENCRYPT_MODE, key, spec)
         val cipherText = cipher.doFinal(plainText.toByteArray(Charsets.UTF_8))
-        
+
         // Return IV + CipherText encoded in Base64
         val combined = iv + cipherText
         return Base64.encodeToString(combined, Base64.NO_WRAP)
     }
 
     fun decrypt(cipherTextBase64: String): String {
-        if (cipherTextBase64.isEmpty()) return ""
         val key = sessionKey ?: throw IllegalStateException("Session key not initialized")
+        return decryptWithKey(key, cipherTextBase64)
+    }
+
+    fun decryptWithKey(key: SecretKey, cipherTextBase64: String): String {
+        if (cipherTextBase64.isEmpty()) return ""
         val combined = Base64.decode(cipherTextBase64, Base64.NO_WRAP)
-        
+
         val iv = combined.copyOfRange(0, IV_LENGTH_BYTE)
         val cipherText = combined.copyOfRange(IV_LENGTH_BYTE, combined.size)
-        
+
         val cipher = Cipher.getInstance(ALGORITHM)
         val spec = GCMParameterSpec(TAG_LENGTH_BIT, iv)
         cipher.init(Cipher.DECRYPT_MODE, key, spec)
-        
+
         val plainTextBytes = cipher.doFinal(cipherText)
         return String(plainTextBytes, Charsets.UTF_8)
+    }
+
+    /** SHA-256 hex of a per-item / per-note lock password (never the master PIN). */
+    fun sha256Hex(input: String): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        return digest.digest(input.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it.toInt() and 0xFF) }
     }
 
     fun generateSecureRandomPassword(length: Int = 16): String {

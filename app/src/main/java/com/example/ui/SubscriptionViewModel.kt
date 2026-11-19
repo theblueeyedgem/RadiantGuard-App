@@ -3,6 +3,7 @@ package com.example.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.data.Currencies
 import com.example.data.SubscriptionItem
 import com.example.data.SubscriptionRepository
 import com.example.reminder.SubscriptionAlarmScheduler
@@ -11,10 +12,12 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import java.util.Calendar
 
 data class SubscriptionSummary(
+    /** Kept for compatibility: total of the first currency, or 0 when empty. Do not use for totals across currencies. */
     val totalMonthlySpend: Double = 0.0,
+    /** Monthly spend grouped BY currency — different currencies are never summed together. */
+    val monthlyByCurrency: Map<String, Double> = emptyMap(),
     val activeCount: Int = 0,
     val upcomingCount: Int = 0
 )
@@ -32,7 +35,7 @@ class SubscriptionViewModel(
         )
 
     val summary: StateFlow<SubscriptionSummary> = subscriptions.map { list ->
-        var monthlyTotal = 0.0
+        val byCurrency = mutableMapOf<String, Double>()
         val now = System.currentTimeMillis()
         val sevenDaysAhead = now + (7L * 24 * 60 * 60 * 1000L)
         var upcoming = 0
@@ -44,7 +47,8 @@ class SubscriptionViewModel(
                 "quarterly" -> item.price / 3.0
                 else -> item.price
             }
-            monthlyTotal += normalizedMonthly
+            val code = Currencies.normalizeCurrency(item.currency)
+            byCurrency[code] = (byCurrency[code] ?: 0.0) + normalizedMonthly
 
             if (item.nextRenewalTimestamp in now..sevenDaysAhead) {
                 upcoming++
@@ -52,7 +56,8 @@ class SubscriptionViewModel(
         }
 
         SubscriptionSummary(
-            totalMonthlySpend = monthlyTotal,
+            totalMonthlySpend = byCurrency.values.firstOrNull() ?: 0.0,
+            monthlyByCurrency = byCurrency,
             activeCount = list.size,
             upcomingCount = upcoming
         )
@@ -64,14 +69,16 @@ class SubscriptionViewModel(
 
     fun addOrUpdateSubscription(item: SubscriptionItem) {
         viewModelScope.launch {
-            val id = if (item.id == 0) {
-                repository.insert(item).toInt()
+            // Normalise the currency to an ISO code on save (old "$" values become PKR).
+            val normalised = item.copy(currency = Currencies.normalizeCurrency(item.currency))
+            val id = if (normalised.id == 0) {
+                repository.insert(normalised).toInt()
             } else {
-                repository.update(item)
-                item.id
+                repository.update(normalised)
+                normalised.id
             }
 
-            val updatedItem = item.copy(id = id)
+            val updatedItem = normalised.copy(id = id)
             if (updatedItem.isAlarmActive) {
                 SubscriptionAlarmScheduler.scheduleAlarm(getApplication(), updatedItem)
             } else {
@@ -84,6 +91,12 @@ class SubscriptionViewModel(
         viewModelScope.launch {
             SubscriptionAlarmScheduler.cancelAlarm(getApplication(), item.id)
             repository.delete(item)
+        }
+    }
+
+    fun togglePin(item: SubscriptionItem) {
+        viewModelScope.launch {
+            repository.update(item.copy(isPinned = !item.isPinned))
         }
     }
 

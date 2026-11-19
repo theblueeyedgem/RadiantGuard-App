@@ -18,8 +18,14 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material3.*
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,9 +47,13 @@ fun VaultListScreen(
     onNavigateToEdit: (Int) -> Unit
 ) {
     val items by viewModel.vaultItems.collectAsStateWithLifecycle()
+    val unlockedIds by viewModel.unlockedIds.collectAsStateWithLifecycle()
     var currentTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
     val context = LocalContext.current
-    
+    var itemToLock by remember { mutableStateOf<DecryptedVaultItem?>(null) }
+    var itemToUnlock by remember { mutableStateOf<DecryptedVaultItem?>(null) }
+    var pendingEditAfterUnlock by remember { mutableStateOf(false) }
+
     // Timer to update TOTP every second
     LaunchedEffect(Unit) {
         while (true) {
@@ -125,17 +135,107 @@ fun VaultListScreen(
                     }
                 }
                 items(items, key = { it.id }) { item ->
+                    val unlocked = viewModel.isUnlocked(item)
                     VaultItemCard(
                         item = item,
                         currentTime = currentTime,
-                        onClick = { onNavigateToEdit(item.id) },
+                        isUnlocked = unlocked,
+                        onClick = {
+                            if (item.isLocked && !unlocked) {
+                                pendingEditAfterUnlock = true
+                                itemToUnlock = item
+                            } else {
+                                onNavigateToEdit(item.id)
+                            }
+                        },
+                        onTogglePin = { viewModel.togglePin(item) },
+                        onLockItem = { itemToLock = item },
+                        onRemoveLock = { viewModel.removeLock(item) },
                         onCopyUsername = { copyToClipboard("Username", item.username) },
-                        onCopyPassword = { copyToClipboard("Password", item.password) },
+                        onCopyPassword = {
+                            if (item.isLocked && !unlocked) {
+                                Toast.makeText(context, "Unlock this item first", Toast.LENGTH_SHORT).show()
+                            } else {
+                                copyToClipboard("Password", item.password)
+                            }
+                        },
                         onCopyTotp = { code -> copyToClipboard("2FA Code", code) }
                     )
                 }
             }
         }
+    }
+
+    // Set / change a per-item lock password
+    itemToLock?.let { item ->
+        var password by remember(item.id) { mutableStateOf("") }
+        var error by remember(item.id) { mutableStateOf<String?>(null) }
+        AlertDialog(
+            onDismissRequest = { itemToLock = null },
+            title = { Text("Lock with Password") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Set a password for \"${item.title}\" (at least 4 characters). Its password and 2FA code stay hidden until it is entered.", style = MaterialTheme.typography.bodySmall)
+                    OutlinedTextField(
+                        value = password,
+                        onValueChange = { password = it; error = null },
+                        label = { Text("Item password") },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Password),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    if (error != null) Text(error!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    viewModel.lockItem(item, password) { ok ->
+                        if (ok) itemToLock = null else error = "Password must be at least 4 characters"
+                    }
+                }) { Text("Lock Item") }
+            },
+            dismissButton = { TextButton(onClick = { itemToLock = null }) { Text("Cancel") } }
+        )
+    }
+
+    // Unlock a locked item (session-only)
+    itemToUnlock?.let { item ->
+        var password by remember(item.id) { mutableStateOf("") }
+        var error by remember(item.id) { mutableStateOf<String?>(null) }
+        AlertDialog(
+            onDismissRequest = { itemToUnlock = null; pendingEditAfterUnlock = false },
+            title = { Text("Unlock Item") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Enter the password for \"${item.title}\" to reveal it.", style = MaterialTheme.typography.bodySmall)
+                    OutlinedTextField(
+                        value = password,
+                        onValueChange = { password = it; error = null },
+                        label = { Text("Item password") },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Password),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    if (error != null) Text(error!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    if (viewModel.tryUnlock(item, password)) {
+                        itemToUnlock = null
+                        if (pendingEditAfterUnlock) {
+                            pendingEditAfterUnlock = false
+                            onNavigateToEdit(item.id)
+                        }
+                    } else {
+                        error = "Wrong password"
+                    }
+                }) { Text("Unlock") }
+            },
+            dismissButton = { TextButton(onClick = { itemToUnlock = null; pendingEditAfterUnlock = false }) { Text("Cancel") } }
+        )
     }
 }
 
@@ -146,8 +246,14 @@ fun VaultItemCard(
     onClick: () -> Unit,
     onCopyUsername: () -> Unit,
     onCopyPassword: () -> Unit,
-    onCopyTotp: (String) -> Unit
+    onCopyTotp: (String) -> Unit,
+    isUnlocked: Boolean = true,
+    onTogglePin: () -> Unit = {},
+    onLockItem: () -> Unit = {},
+    onRemoveLock: () -> Unit = {}
 ) {
+    var showMenu by remember { mutableStateOf(false) }
+    val lockedHidden = item.isLocked && !isUnlocked
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -181,21 +287,68 @@ fun VaultItemCard(
                 Spacer(modifier = Modifier.width(14.dp))
                 
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = item.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (item.isPinned) {
+                            Icon(Icons.Default.PushPin, contentDescription = "Pinned", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                        }
+                        if (item.isLocked) {
+                            Icon(Icons.Default.Lock, contentDescription = "Locked", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                        }
+                        Text(
+                            text = item.title,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                     if (item.username.isNotEmpty()) {
                         Text(
                             text = item.username,
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    if (item.isLocked && !isUnlocked) {
+                        Text(
+                            text = "••••••  Locked — tap to unlock",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
-                
+
+                Box {
+                    IconButton(onClick = { showMenu = true }, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "Item options", modifier = Modifier.size(18.dp))
+                    }
+                    DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                        DropdownMenuItem(
+                            text = { Text(if (item.isPinned) "Unpin" else "Pin") },
+                            onClick = { showMenu = false; onTogglePin() },
+                            leadingIcon = { Icon(Icons.Default.PushPin, contentDescription = null) }
+                        )
+                        DropdownMenuItem(
+                            text = { Text(if (item.isLocked) "Change Password" else "Lock with Password") },
+                            onClick = { showMenu = false; onLockItem() },
+                            leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null) }
+                        )
+                        if (item.isLocked) {
+                            DropdownMenuItem(
+                                text = { Text("Remove Lock") },
+                                onClick = { showMenu = false; onRemoveLock() }
+                            )
+                        }
+                    }
+                }
+
                 Icon(
                     Icons.AutoMirrored.Filled.KeyboardArrowRight,
                     contentDescription = "Edit details",
@@ -223,7 +376,7 @@ fun VaultItemCard(
                         }
                     }
 
-                    if (item.password.isNotEmpty()) {
+                    if (item.password.isNotEmpty() && !lockedHidden) {
                         OutlinedButton(
                             onClick = onCopyPassword,
                             modifier = Modifier.height(32.dp),
@@ -238,7 +391,7 @@ fun VaultItemCard(
                 }
             }
             
-            if (item.totpSecret.isNotEmpty()) {
+            if (item.totpSecret.isNotEmpty() && !lockedHidden) {
                 Spacer(modifier = Modifier.height(12.dp))
                 
                 val totpCode = TOTPGenerator.generateTOTP(item.totpSecret, currentTime)

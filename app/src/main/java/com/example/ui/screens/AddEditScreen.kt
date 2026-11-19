@@ -202,6 +202,9 @@ fun AddEditScreen(
                             password = password,
                             totpSecret = totpSecret.replace(" ", "").uppercase(),
                             notes = notes,
+                            isPinned = existingItem?.isPinned ?: false,
+                            isLocked = existingItem?.isLocked ?: false,
+                            lockPasswordHash = existingItem?.lockPasswordHash ?: "",
                             createdAt = existingItem?.createdAt ?: System.currentTimeMillis()
                         )
                     )

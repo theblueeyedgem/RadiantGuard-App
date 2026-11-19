@@ -4,10 +4,17 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -22,11 +29,18 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        
+
         val app = application as RadiantGuardApplication
-        
+
         setContent {
-            MyApplicationTheme {
+            // Theme mode (system / light / dark) chosen in MainScreen's overflow menu.
+            val themeMode by app.settingsStore.themeModeFlow.collectAsState()
+            val darkTheme = when (themeMode) {
+                "dark" -> true
+                "light" -> false
+                else -> isSystemInDarkTheme()
+            }
+            MyApplicationTheme(darkTheme = darkTheme) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
@@ -35,11 +49,24 @@ class MainActivity : ComponentActivity() {
                         factory = object : ViewModelProvider.Factory {
                             @Suppress("UNCHECKED_CAST")
                             override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                                return AuthViewModel(app.settingsStore) as T
+                                return AuthViewModel(app.settingsStore, app.vaultRepository) as T
                             }
                         }
                     )
-                    
+
+                    // Auto-lock: when the app goes to the background (ProcessLifecycleOwner
+                    // ON_STOP), clear the session so the PIN is required again on return.
+                    // Rotation / config change does NOT trigger this — only backgrounding.
+                    DisposableEffect(authViewModel) {
+                        val observer = object : DefaultLifecycleObserver {
+                            override fun onStop(owner: LifecycleOwner) {
+                                authViewModel.logout()
+                            }
+                        }
+                        ProcessLifecycleOwner.get().lifecycle.addObserver(observer)
+                        onDispose { ProcessLifecycleOwner.get().lifecycle.removeObserver(observer) }
+                    }
+
                     val vaultViewModel: VaultViewModel = viewModel(
                         factory = object : ViewModelProvider.Factory {
                             @Suppress("UNCHECKED_CAST")
@@ -66,7 +93,7 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                     )
-                    
+
                     AppNavigation(
                         authViewModel = authViewModel,
                         vaultViewModel = vaultViewModel,

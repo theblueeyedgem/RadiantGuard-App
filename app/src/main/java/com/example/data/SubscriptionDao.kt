@@ -10,7 +10,7 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface SubscriptionDao {
-    @Query("SELECT * FROM subscriptions ORDER BY nextRenewalTimestamp ASC")
+    @Query("SELECT * FROM subscriptions ORDER BY isPinned DESC, nextRenewalTimestamp ASC")
     fun getAllSubscriptions(): Flow<List<SubscriptionItem>>
 
     @Query("SELECT * FROM subscriptions WHERE isAlarmActive = 1")

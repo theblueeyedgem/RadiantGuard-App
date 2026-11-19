@@ -62,10 +62,8 @@ fun AppNavigation(
                     noteViewModel = noteViewModel,
                     authViewModel = authViewModel,
                     onLock = {
+                        // Just log out; the LaunchedEffect above owns navigation to "auth".
                         authViewModel.logout()
-                        navController.navigate("auth") {
-                            popUpTo(0) { inclusive = true }
-                        }
                     },
                     onNavigateToAddPassword = {
                         navController.navigate("addEditPassword/-1")
